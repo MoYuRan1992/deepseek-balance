@@ -229,7 +229,7 @@ class DeepSeekBalanceApp(rumps.App):
         self.menu_settings = rumps.MenuItem(title=self._t('设置'), callback=self.show_settings)
         self.menu_usage = rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage)
         self.menu_version = rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None)
-        self.menu_about = rumps.MenuItem(title=self._t(self._t('关于')), callback=self.show_about)
+        self.menu_about = rumps.MenuItem(title=self._t('关于'), callback=self.show_about)
 
         self.menu = [
             self.menu_item_total,
@@ -711,11 +711,14 @@ class DeepSeekBalanceApp(rumps.App):
     @rumps.clicked('设置...')
     def show_settings(self, _):
         """弹出设置面板，修改即时生效"""
-        W, row_h, pad = 360, 26, 12
+        if hasattr(self, '_settings_panel') and self._settings_panel.isVisible():
+            self._settings_panel.makeKeyAndOrderFront_(None)
+            return
+        W, row_h, pad = 320, 26, 12
         left = 14
-        label_w = 54
-        ctrl_x = left + label_w + 10
-        rows = 10
+        label_w = 50
+        ctrl_x = left + label_w + 8
+        rows = 12
         win_h = rows * (row_h + pad) + pad * 2
 
         panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -730,7 +733,7 @@ class DeepSeekBalanceApp(rumps.App):
 
         content = panel.contentView()
         y = win_h - pad - row_h
-        font14 = AppKit.NSFont.systemFontOfSize_(14)
+        font14 = AppKit.NSFont.systemFontOfSize_(15)
 
         def lbl(text):
             t = AppKit.NSTextField.labelWithString_(text)
@@ -778,6 +781,10 @@ class DeepSeekBalanceApp(rumps.App):
         inp(self.display_prefix, 'onPrefixChange:')
         y -= row_h + pad
 
+        lbl('Key')
+        inp(self.api_key[:12] + '...' + self.api_key[-4:] if len(self.api_key) > 16 else self.api_key, 'onKeyChange:')
+        y -= row_h + pad
+
         lbl(self._t('刷新'))
         intervals = ['1分钟', '5分钟', '10分钟', '30分钟', '1小时']
         self._settings_int_vals = [60, 300, 600, 1800, 3600]
@@ -815,13 +822,13 @@ class DeepSeekBalanceApp(rumps.App):
         y -= row_h + pad
 
         btn_h = row_h - 2
-        b1 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 1), (120, btn_h)))
+        b1 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 1), (100, btn_h)))
         b1.setTitle_(self._t('多端同步说明'))
         b1.setBezelStyle_(AppKit.NSRoundedBezelStyle)
         b1.setTarget_(self)
         b1.setAction_('showSyncHelp:')
         content.addSubview_(b1)
-        b2 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x + 130, y + 1), (80, btn_h)))
+        b2 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x + 110, y + 1), (80, btn_h)))
         b2.setTitle_(self._t('关于'))
         b2.setBezelStyle_(AppKit.NSRoundedBezelStyle)
         b2.setTarget_(self)
@@ -845,13 +852,6 @@ class DeepSeekBalanceApp(rumps.App):
         author.setAlignment_(AppKit.NSTextAlignmentRight)
         content.addSubview_(author)
 
-        lbl(self._t('多端'))
-        t = AppKit.NSTextField.labelWithString_(self._t('多端同步说明文字'))
-        t.setFont_(font14)
-        t.setTextColor_(AppKit.NSColor.secondaryLabelColor())
-        t.setFrame_(((ctrl_x, y + 6), (200, 17)))
-        content.addSubview_(t)
-
         self._settings_panel = panel
         AppKit.NSApp().activateIgnoringOtherApps_(True)
         panel.makeKeyAndOrderFront_(None)
@@ -864,6 +864,25 @@ class DeepSeekBalanceApp(rumps.App):
             self.display_prefix = val
             self._save_settings()
             self.update_balance()
+
+    def onKeyChange_(self, sender):
+        """弹出对话框修改 API Key"""
+        window = rumps.Window(
+            message='请输入 DeepSeek API Key：',
+            title='修改 API Key',
+            default_text=self.api_key,
+            ok='保存',
+            cancel='取消',
+            dimensions=(420, 80),
+            has_secret=True,
+        )
+        response = window.run()
+        if response.clicked and window.text.strip():
+            self.api_key = window.text.strip()
+            self._save_settings()
+            self._set_custom_title('...', self.display_prefix)
+            self.update_balance()
+            log(self._t('日志_检测到API_Key变更'))
 
     def onIntervalChange_(self, sender):
         idx = sender.indexOfSelectedItem()
