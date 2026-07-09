@@ -1,7 +1,7 @@
 from setuptools import setup
 
 APP = ['deepseek_balance_app.py']
-DATA_FILES = []
+DATA_FILES = [('locales', ['locales/zh-CN.json', 'locales/en.json', 'locales/ru.json'])]
 OPTIONS = {
     'argv_emulation': False,
     'plist': {

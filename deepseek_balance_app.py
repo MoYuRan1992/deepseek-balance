@@ -40,6 +40,20 @@ INTERVAL_PRESETS = {
 }
 
 _ssl_context_cache = None
+_locale_data = {}
+LOCALE_DIR = Path(__file__).resolve().parent / 'locales'
+
+
+def load_locale(lang='zh-CN'):
+    """加载语言文件，回退到中文"""
+    global _locale_data
+    path = LOCALE_DIR / f'{lang}.json'
+    try:
+        with open(path, 'r', encoding='utf-8') as f:
+            _locale_data = json.load(f)
+    except Exception:
+        _locale_data = {}
+        log(f'语言文件加载失败: {path}')
 
 
 def log(msg):
@@ -171,7 +185,7 @@ class DeepSeekBalanceApp(rumps.App):
         super(DeepSeekBalanceApp, self).__init__(
             name='API',
             title='...',
-            quit_button='退出',
+            quit_button=self._t('退出'),
         )
         self.config = load_config()
         self.api_key = os.environ.get('DEEPSEEK_API_KEY', '').strip()
@@ -184,6 +198,8 @@ class DeepSeekBalanceApp(rumps.App):
         self.warn_threshold = float(self.config.get('warn_threshold', 5))
         self.critical_threshold = float(self.config.get('critical_threshold', 20))
         self.refresh_interval = int(self.config.get('refresh_interval', 300))
+        self.lang = self.config.get('lang', 'zh-CN')
+        load_locale(self.lang)
         self.current_balance = None
         self.is_cached = False
         self.trend = ''
@@ -204,23 +220,23 @@ class DeepSeekBalanceApp(rumps.App):
                 self._prev_total = 0.0
 
         # 余额显示
-        self.menu_item_total = rumps.MenuItem(title='余额显示: ---')
-        self.menu_item_used = rumps.MenuItem(title='今日使用: ---')
+        self.menu_item_total = rumps.MenuItem(title=self._t('余额显示') + ': ---')
+        self.menu_item_used = rumps.MenuItem(title=self._t('今日使用') + ': ---')
 
         self.menu = [
             self.menu_item_total,
             self.menu_item_used,
             None,
-            rumps.MenuItem(title='立即刷新', callback=self.refresh_balance),
-            rumps.MenuItem(title='打开 DeepSeek 开放平台', callback=self.open_platform),
-            rumps.MenuItem(title='打开 DeepSeek 开始对话', callback=self.open_chat),
+            rumps.MenuItem(title=self._t('立即刷新'), callback=self.refresh_balance),
+            rumps.MenuItem(title=self._t('打开_DeepSeek_开放平台'), callback=self.open_platform),
+            rumps.MenuItem(title=self._t('打开_DeepSeek_开始对话'), callback=self.open_chat),
             None,
-            rumps.MenuItem(title='设置...', callback=self.show_settings),
+            rumps.MenuItem(title=self._t('设置'), callback=self.show_settings),
             None,
-            rumps.MenuItem(title='使用统计', callback=self.show_usage),
-            rumps.MenuItem(title='版本: v' + APP_VERSION, callback=None),
+            rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage),
+            rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None),
             None,
-            rumps.MenuItem(title='关于 DeepSeek Balance', callback=self.show_about),
+            rumps.MenuItem(title=self._t('关于'), callback=self.show_about),
         ]
 
         self.timer = rumps.Timer(self.update_balance, self.refresh_interval)
@@ -255,6 +271,16 @@ class DeepSeekBalanceApp(rumps.App):
             return f'{seconds // 60} 分钟'
         else:
             return f'{seconds // 3600} 小时'
+
+    def _t(self, key, **kwargs):
+        """获取翻译文字"""
+        text = _locale_data.get(key, key)
+        if kwargs:
+            try:
+                return text.format(**kwargs)
+            except Exception:
+                return text
+        return text
 
     def _set_custom_title(self, top_text, bottom_text, top_color=None):
         """用自定义 NSView 实现上下两行显示（参照 State 应用方案）"""
@@ -416,33 +442,15 @@ class DeepSeekBalanceApp(rumps.App):
     def show_sync_help(self, _):
         config_path = str(CONFIG_FILE.resolve()) if CONFIG_FILE.exists() else str(CONFIG_FILE)
         is_symlink = CONFIG_FILE.is_symlink() if CONFIG_FILE.exists() else False
-        sync_status = '当前已通过符号链接同步' if is_symlink else '当前为本地配置'
-        icloud = f'{Path.home()}/Library/Mobile Documents/com~apple~CloudDocs'
-        msg = (
-            f'{sync_status}\n\n'
-            f'多端同步方法：\n\n'
-            f'1. 在 Finder 中打开 iCloud Drive\n'
-            f'2. 将配置文件复制到 iCloud Drive 中\n'
-            f'3. 在终端执行：\n'
-            f'   ln -sf "{icloud}/config.json" "{config_path}"\n\n'
-            f'4. 在其他 Mac 上重复步骤 3\n\n'
-            f'配置文件：{config_path}'
-        )
+        sync_status = self._t('当前已同步') if is_symlink else self._t('当前本地配置')
+        msg = self._t('多端同步内容', status=sync_status, icloud=icloud, config_path=config_path)
         rumps.alert(msg)
 
     # ---------- 关于 ----------
 
     @rumps.clicked('关于 DeepSeek Balance')
     def show_about(self, _):
-        msg = (
-            f'DeepSeek Balance v{APP_VERSION}\n\n'
-            f'在 macOS 菜单栏实时显示\n'
-            f'DeepSeek API 账户余额。\n\n'
-            f'作者: MoYuRan\n\n'
-            f'配置文件：{CONFIG_FILE}\n'
-            f'日志文件：{LOG_FILE}\n'
-            f'缓存文件：{CACHE_FILE}'
-        )
+        msg = self._t('关于内容', version=APP_VERSION, config=CONFIG_FILE, log=LOG_FILE, cache=CACHE_FILE)
         rumps.alert(msg)
 
     # ---------- 刷新间隔 ----------
@@ -551,8 +559,8 @@ class DeepSeekBalanceApp(rumps.App):
     def update_balance(self, _=None):
         if not self.api_key:
             self._set_custom_title('⚙', self.display_prefix)
-            self.menu_item_total.title = '余额显示: ---'
-            self.menu_item_used.title = '今日使用: ---'
+            self.menu_item_total.title = self._t('余额显示') + ': ---'
+            self.menu_item_used.title = self._t('今日使用') + ': ---'
             return
 
         try:
@@ -575,7 +583,6 @@ class DeepSeekBalanceApp(rumps.App):
             self.current_balance = balance
             self._first_update = False
 
-            # 今日使用：余额减少多少，今日使用增加多少
             today_str = datetime.now().strftime('%Y-%m-%d')
             if self.today_date != today_str:
                 if self.today_date:
@@ -597,9 +604,9 @@ class DeepSeekBalanceApp(rumps.App):
                 'prev_total': self._prev_total,
                 'today_used': self.today_used,
             })
-            log(f'余额更新: ¥{balance["total"]:.2f}{self.trend}')
+            log(f'{self._t("日志_余额更新")}: ¥{balance["total"]:.2f}{self.trend}')
         except Exception as e:
-            log(f'查询失败: {e}')
+            log(f'{self._t("日志_查询失败")}: {e}')
             cached = load_cache()
             if cached and cached.get('balance'):
                 self.current_balance = cached['balance']
@@ -609,32 +616,27 @@ class DeepSeekBalanceApp(rumps.App):
             else:
                 self.current_balance = None
                 self._set_custom_title('✗', self.display_prefix)
-                self.menu_item_total.title = '余额显示: 查询失败'
-                self.menu_item_used.title = f'错误: {e}'
+                self.menu_item_total.title = self._t('查询失败')
+                self.menu_item_used.title = f'{self._t("错误_网络")}: {e}'
                 return
 
         total = self.current_balance['total']
         prefix = self.display_prefix
         is_cached = self.is_cached
 
-        # 余额不足通知
         if not self._first_update and not is_cached:
             if total < self.warn_threshold and self._prev_balance_ok:
                 rumps.notification(
-                    title='余额不足警告',
-                    subtitle=f'DeepSeek 余额仅剩 ¥{total:.2f}',
-                    message='请及时充值',
+                    title=self._t('余额不足警告'),
+                    subtitle=self._t('余额不足内容', balance=f'{total:.2f}'),
+                    message=self._t('请及时充值'),
                     sound=True,
                 )
             self._prev_balance_ok = total >= self.warn_threshold
 
-        # 构建上行文字
         top = f'¥{total:.2f}'
-
-        # 下行
         bottom = prefix
 
-        # 颜色
         if total < self.warn_threshold and not is_cached:
             top_color = AppKit.NSColor.systemRedColor()
         elif total < self.critical_threshold and not is_cached:
@@ -644,17 +646,18 @@ class DeepSeekBalanceApp(rumps.App):
 
         self._set_custom_title(top, bottom, top_color)
 
-        # 菜单详情
-        self.menu_item_total.title = f'余额显示: ¥{total:.2f}'
-        self.menu_item_used.title = f'今日使用: ¥{self.today_used:.2f}'
+        self.menu_item_total.title = self._t('余额显示') + f': ¥{total:.2f}'
+        self.menu_item_used.title = self._t('今日使用') + f': ¥{self.today_used:.2f}'
 
     @rumps.clicked('立即刷新')
     def refresh_balance(self, _):
         self.config = load_config()
+        self.lang = self.config.get('lang', 'zh-CN')
+        load_locale(self.lang)
         new_key = self.config.get('api_key', '').strip()
         if new_key and new_key != self.api_key:
             self.api_key = new_key
-            log('检测到 API Key 变更')
+            log(self._t('日志_检测到API_Key变更'))
         self._set_custom_title('...', self.display_prefix)
         self.update_balance()
 
