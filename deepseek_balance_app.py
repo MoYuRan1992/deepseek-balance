@@ -155,22 +155,22 @@ def query_balance(api_key):
         with urllib.request.urlopen(req, timeout=10, context=_get_ssl_context()) as resp:
             return json.loads(resp.read().decode('utf-8'))
     except urllib.error.HTTPError as e:
-        raise Exception(f'服务器返回错误 {e.code}')
+        raise Exception(self._t('错误_服务器') + ' ' + str(e.code))
     except urllib.error.URLError as e:
         reason = str(e.reason)
         if 'SSL' in reason or 'certificate' in reason.lower():
-            raise Exception('SSL 证书验证失败，请检查网络代理')
-        raise Exception(f'网络连接失败: {reason}')
+            raise Exception(self._t('错误_SSL'))
+        raise Exception(self._t('错误_网络') + ': ' + reason)
     except json.JSONDecodeError:
-        raise Exception('响应格式异常')
+        raise Exception(self._t('错误_响应格式'))
 
 
 def parse_balance(data):
     if not data.get('is_available'):
-        raise Exception('账户不可用')
+        raise Exception(self._t('错误_账户不可用'))
     balance_infos = data.get('balance_infos', [])
     if not balance_infos:
-        raise Exception('无余额信息')
+        raise Exception(self._t('错误_无余额'))
     info = balance_infos[0]
     return {
         'currency': info.get('currency', 'CNY'),
@@ -223,20 +223,28 @@ class DeepSeekBalanceApp(rumps.App):
         self.menu_item_total = rumps.MenuItem(title=self._t('余额显示') + ': ---')
         self.menu_item_used = rumps.MenuItem(title=self._t('今日使用') + ': ---')
 
+        self.menu_refresh = rumps.MenuItem(title=self._t('立即刷新'), callback=self.refresh_balance)
+        self.menu_platform = rumps.MenuItem(title=self._t('打开_DeepSeek_开放平台'), callback=self.open_platform)
+        self.menu_chat = rumps.MenuItem(title=self._t('打开_DeepSeek_开始对话'), callback=self.open_chat)
+        self.menu_settings = rumps.MenuItem(title=self._t('设置'), callback=self.show_settings)
+        self.menu_usage = rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage)
+        self.menu_version = rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None)
+        self.menu_about = rumps.MenuItem(title=self._t(self._t('关于')), callback=self.show_about)
+
         self.menu = [
             self.menu_item_total,
             self.menu_item_used,
             None,
-            rumps.MenuItem(title=self._t('立即刷新'), callback=self.refresh_balance),
-            rumps.MenuItem(title=self._t('打开_DeepSeek_开放平台'), callback=self.open_platform),
-            rumps.MenuItem(title=self._t('打开_DeepSeek_开始对话'), callback=self.open_chat),
+            self.menu_refresh,
+            self.menu_platform,
+            self.menu_chat,
             None,
-            rumps.MenuItem(title=self._t('设置'), callback=self.show_settings),
+            self.menu_settings,
             None,
-            rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage),
-            rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None),
+            self.menu_usage,
+            self.menu_version,
             None,
-            rumps.MenuItem(title=self._t('关于'), callback=self.show_about),
+            self.menu_about,
         ]
 
         self.timer = rumps.Timer(self.update_balance, self.refresh_interval)
@@ -245,7 +253,7 @@ class DeepSeekBalanceApp(rumps.App):
         self._init_timer = rumps.Timer(self._initial_update, 1.0)
         self._init_timer.start()
 
-        log('应用启动')
+        log(self._t('日志_应用启动'))
 
     def _initial_update(self, _=None):
         """run 循环就绪后执行首次更新；若 statusbar 未就绪则重试"""
@@ -257,7 +265,7 @@ class DeepSeekBalanceApp(rumps.App):
         self.update_balance()
 
     def cleanup_before_quit(self):
-        log('应用退出')
+        log(self._t('日志_应用退出'))
         release_lock()
         super().cleanup_before_quit()
 
@@ -473,14 +481,14 @@ class DeepSeekBalanceApp(rumps.App):
             try:
                 seconds = int(val)
                 if seconds < 10:
-                    rumps.alert('间隔不能小于 10 秒')
+                    rumps.alert(self._t('间隔不能小于10秒'))
                     return
                 if seconds > 86400:
-                    rumps.alert('间隔不能超过 24 小时（86400 秒）')
+                    rumps.alert(self._t('间隔不能超过24小时'))
                     return
                 self._set_interval(seconds)
             except ValueError:
-                rumps.alert('请输入有效的数字')
+                rumps.alert(self._t('请输入有效数字'))
 
     # ---------- 前缀 ----------
 
@@ -488,7 +496,7 @@ class DeepSeekBalanceApp(rumps.App):
         val = self._prompt_input('设置前缀', '菜单栏显示的前缀文字（最多 8 个字符）：', self.display_prefix)
         if val:
             if len(val) > 8:
-                rumps.alert('前缀最多 8 个字符')
+                rumps.alert(self._t('前缀最多8字符'))
                 return
             self.display_prefix = val
             self._save_settings()
@@ -499,7 +507,7 @@ class DeepSeekBalanceApp(rumps.App):
 
     def _set_warn_threshold(self, value):
         if value >= self.critical_threshold:
-            rumps.alert(f'警告线必须小于严重线（当前严重线: ¥{self.critical_threshold:.0f}）')
+            rumps.alert(self._t('警告线须小于严重线', value=f'{self.critical_threshold:.0f}'))
             return
         self.warn_threshold = float(value)
         self._save_settings()
@@ -512,17 +520,17 @@ class DeepSeekBalanceApp(rumps.App):
             try:
                 threshold = float(val)
                 if threshold <= 0:
-                    rumps.alert('阈值必须大于 0')
+                    rumps.alert(self._t('阈值必须大于0'))
                     return
                 self._set_warn_threshold(threshold)
             except ValueError:
-                rumps.alert('请输入有效的数字')
+                rumps.alert(self._t('请输入有效数字'))
 
     # ---------- 严重线 ----------
 
     def _set_critical_threshold(self, value):
         if value <= self.warn_threshold:
-            rumps.alert(f'严重线必须大于警告线（当前警告线: ¥{self.warn_threshold:.0f}）')
+            rumps.alert(self._t('严重线须大于警告线', value=f'{self.warn_threshold:.0f}'))
             return
         self.critical_threshold = float(value)
         self._save_settings()
@@ -535,11 +543,11 @@ class DeepSeekBalanceApp(rumps.App):
             try:
                 threshold = float(val)
                 if threshold <= 0:
-                    rumps.alert('阈值必须大于 0')
+                    rumps.alert(self._t('阈值必须大于0'))
                     return
                 self._set_critical_threshold(threshold)
             except ValueError:
-                rumps.alert('请输入有效的数字')
+                rumps.alert(self._t('请输入有效数字'))
 
     # ---------- 字体大小 ----------
 
@@ -715,7 +723,7 @@ class DeepSeekBalanceApp(rumps.App):
             AppKit.NSWindowStyleMaskTitled | AppKit.NSWindowStyleMaskClosable,
             AppKit.NSBackingStoreBuffered, False
         )
-        panel.setTitle_('DeepSeek Balance 设置')
+        panel.setTitle_(self._t('设置标题'))
         panel.center()
         panel.setStyleMask_(panel.styleMask() | AppKit.NSWindowStyleMaskUtilityWindow)
         panel.setHidesOnDeactivate_(False)
@@ -766,39 +774,39 @@ class DeepSeekBalanceApp(rumps.App):
             content.addSubview_(cb)
             return cb
 
-        lbl('前 缀\u3000')
+        lbl(self._t('前缀'))
         inp(self.display_prefix, 'onPrefixChange:')
         y -= row_h + pad
 
-        lbl('刷 新\u3000')
+        lbl(self._t('刷新'))
         intervals = ['1分钟', '5分钟', '10分钟', '30分钟', '1小时']
         self._settings_int_vals = [60, 300, 600, 1800, 3600]
         sel(intervals, self._format_interval(), 'onIntervalChange:')
         y -= row_h + pad
 
-        lbl('上字号')
+        lbl(self._t('上字号'))
         self._settings_top_fonts = [7, 8, 9, 10, 11, 12, 13, 14]
         sel([str(f) + 'pt' for f in self._settings_top_fonts], str(self.top_font_size) + 'pt', 'onTopFontChange:')
         y -= row_h + pad
 
-        lbl('下字号')
+        lbl(self._t('下字号'))
         self._settings_bot_fonts = [5, 6, 7, 8, 9, 10]
         sel([str(f) + 'pt' for f in self._settings_bot_fonts], str(self.bottom_font_size) + 'pt', 'onBottomFontChange:')
         y -= row_h + pad
 
-        lbl('警告线')
+        lbl(self._t('警告线'))
         inp(str(self.warn_threshold), 'onWarnChange:')
         y -= row_h + pad
 
-        lbl('严重线')
+        lbl(self._t('严重线'))
         inp(str(self.critical_threshold), 'onCriticalChange:')
         y -= row_h + pad
 
-        lbl('开 机\u3000')
-        chk('开机自启', LAUNCHD_PLIST.exists())
+        lbl(self._t('开机'))
+        chk(self._t('开机自启'), LAUNCHD_PLIST.exists())
         y -= row_h + pad
 
-        lbl('语言')
+        lbl(self._t('语言'))
         lang_opts = ['简体中文', 'English', 'Русский']
         lang_vals = ['zh-CN', 'en', 'ru']
         cur_lang = {'zh-CN': '简体中文', 'en': 'English', 'ru': 'Русский'}.get(self.lang, '简体中文')
@@ -808,13 +816,13 @@ class DeepSeekBalanceApp(rumps.App):
 
         btn_h = row_h - 2
         b1 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 1), (120, btn_h)))
-        b1.setTitle_('多端同步说明')
+        b1.setTitle_(self._t('多端同步说明'))
         b1.setBezelStyle_(AppKit.NSRoundedBezelStyle)
         b1.setTarget_(self)
         b1.setAction_('showSyncHelp:')
         content.addSubview_(b1)
         b2 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x + 130, y + 1), (80, btn_h)))
-        b2.setTitle_('关于')
+        b2.setTitle_(self._t('关于'))
         b2.setBezelStyle_(AppKit.NSRoundedBezelStyle)
         b2.setTarget_(self)
         b2.setAction_('showAbout:')
@@ -822,15 +830,15 @@ class DeepSeekBalanceApp(rumps.App):
         y -= row_h + pad
 
         # 作者（右下角贴边）
-        author = AppKit.NSTextField.labelWithString_('by MoYuRan')
+        author = AppKit.NSTextField.labelWithString_(self._t('by_MoYuRan'))
         author.setFont_(AppKit.NSFont.systemFontOfSize_(10))
         author.setTextColor_(AppKit.NSColor.secondaryLabelColor())
         author.setFrame_(((W - 110, 4), (100, 14)))
         author.setAlignment_(AppKit.NSTextAlignmentRight)
         content.addSubview_(author)
 
-        lbl('多 端\u3000')
-        t = AppKit.NSTextField.labelWithString_('终端 ln -sf 链接 iCloud')
+        lbl(self._t('多端'))
+        t = AppKit.NSTextField.labelWithString_(self._t('多端同步说明文字'))
         t.setFont_(font14)
         t.setTextColor_(AppKit.NSColor.secondaryLabelColor())
         t.setFrame_(((ctrl_x, y + 6), (200, 17)))
@@ -895,24 +903,19 @@ class DeepSeekBalanceApp(rumps.App):
             self._save_settings()
             load_locale(self.lang)
             self.refresh_language()
+            # 关闭设置面板，下次打开显示新语言
+            if hasattr(self, '_settings_panel'):
+                self._settings_panel.orderOut_(None)
 
     def refresh_language(self):
-        """刷新菜单文字"""
-        self.menu = [
-            self.menu_item_total,
-            self.menu_item_used,
-            None,
-            rumps.MenuItem(title=self._t('立即刷新'), callback=self.refresh_balance),
-            rumps.MenuItem(title=self._t('打开_DeepSeek_开放平台'), callback=self.open_platform),
-            rumps.MenuItem(title=self._t('打开_DeepSeek_开始对话'), callback=self.open_chat),
-            None,
-            rumps.MenuItem(title=self._t('设置'), callback=self.show_settings),
-            None,
-            rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage),
-            rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None),
-            None,
-            rumps.MenuItem(title=self._t('关于'), callback=self.show_about),
-        ]
+        """切换语言后刷新菜单文字（直接更新 NSMenuItem title）"""
+        self.menu_refresh.title = self._t('立即刷新')
+        self.menu_platform.title = self._t('打开_DeepSeek_开放平台')
+        self.menu_chat.title = self._t('打开_DeepSeek_开始对话')
+        self.menu_settings.title = self._t('设置')
+        self.menu_usage.title = self._t('使用统计')
+        self.menu_version.title = self._t('版本') + ': v' + APP_VERSION
+        self.menu_about.title = self._t(self._t('关于'))
         self.update_balance()
 
     def showSyncHelp_(self, _):
@@ -931,7 +934,7 @@ def main():
         AppKit.NSApplicationActivationPolicyAccessory
     )
     if not acquire_lock():
-        rumps.alert('DeepSeek Balance 已在运行中\n\n请查看菜单栏右上角。')
+        rumps.alert(self._t('已在运行中'))
         return
     DeepSeekBalanceApp().run()
 
