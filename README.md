@@ -1,6 +1,6 @@
 # DeepSeek Balance
 
-macOS 菜单栏实时显示 DeepSeek API 余额，仿 State 应用风格。
+macOS 菜单栏实时显示 DeepSeek API 余额。
 
 ## 功能
 
