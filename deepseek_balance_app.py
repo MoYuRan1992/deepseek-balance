@@ -829,6 +829,14 @@ class DeepSeekBalanceApp(rumps.App):
         content.addSubview_(b2)
         y -= row_h + pad
 
+        lbl(self._t('多端'))
+        t = AppKit.NSTextField.labelWithString_(self._t('多端同步说明文字'))
+        t.setFont_(font14)
+        t.setTextColor_(AppKit.NSColor.secondaryLabelColor())
+        t.setFrame_(((ctrl_x, y + 6), (200, 17)))
+        content.addSubview_(t)
+        y -= row_h + pad
+
         # 作者（右下角贴边）
         author = AppKit.NSTextField.labelWithString_(self._t('by_MoYuRan'))
         author.setFont_(AppKit.NSFont.systemFontOfSize_(10))

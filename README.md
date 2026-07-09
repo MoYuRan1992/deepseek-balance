@@ -17,6 +17,21 @@ macOS 菜单栏实时显示 DeepSeek API 余额。
 
 首次打开若提示无法验证，右键 → 打开即可。
 
+## 配置
+
+首次运行后点击菜单栏图标 →「设置...」，在**前缀**输入框中粘贴你的 [DeepSeek API Key](https://platform.deepseek.com/api_keys)，修改即时生效。
+
+也可直接编辑配置文件 `~/.config/deepseek-balance/config.json`：
+
+```json
+{
+  "api_key": "sk-你的API-Key",
+  "lang": "zh-CN"
+}
+```
+
+> 请勿将含真实 Key 的 config.json 提交到公开仓库。仓库中 `config.example.json` 仅为模板。
+
 ## 系统要求
 
 - macOS 10.14+
