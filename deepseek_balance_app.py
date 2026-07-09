@@ -361,6 +361,7 @@ class DeepSeekBalanceApp(rumps.App):
         self.config['warn_threshold'] = self.warn_threshold
         self.config['critical_threshold'] = self.critical_threshold
         self.config['refresh_interval'] = self.refresh_interval
+        self.config['lang'] = self.lang
         CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         with open(CONFIG_FILE, 'w', encoding='utf-8') as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
@@ -706,7 +707,7 @@ class DeepSeekBalanceApp(rumps.App):
         left = 14
         label_w = 54
         ctrl_x = left + label_w + 10
-        rows = 9
+        rows = 10
         win_h = rows * (row_h + pad) + pad * 2
 
         panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -797,6 +798,14 @@ class DeepSeekBalanceApp(rumps.App):
         chk('开机自启', LAUNCHD_PLIST.exists())
         y -= row_h + pad
 
+        lbl('语言')
+        lang_opts = ['简体中文', 'English', 'Русский']
+        lang_vals = ['zh-CN', 'en', 'ru']
+        cur_lang = {'zh-CN': '简体中文', 'en': 'English', 'ru': 'Русский'}.get(self.lang, '简体中文')
+        self._settings_lang_vals = lang_vals
+        sel(lang_opts, cur_lang, 'onLanguageChange:')
+        y -= row_h + pad
+
         btn_h = row_h - 2
         b1 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 1), (120, btn_h)))
         b1.setTitle_('多端同步说明')
@@ -878,6 +887,33 @@ class DeepSeekBalanceApp(rumps.App):
         else:
             if LAUNCHD_PLIST.exists():
                 self.toggle_autostart(None)
+
+    def onLanguageChange_(self, sender):
+        idx = sender.indexOfSelectedItem()
+        if 0 <= idx < len(self._settings_lang_vals):
+            self.lang = self._settings_lang_vals[idx]
+            self._save_settings()
+            load_locale(self.lang)
+            self.refresh_language()
+
+    def refresh_language(self):
+        """刷新菜单文字"""
+        self.menu = [
+            self.menu_item_total,
+            self.menu_item_used,
+            None,
+            rumps.MenuItem(title=self._t('立即刷新'), callback=self.refresh_balance),
+            rumps.MenuItem(title=self._t('打开_DeepSeek_开放平台'), callback=self.open_platform),
+            rumps.MenuItem(title=self._t('打开_DeepSeek_开始对话'), callback=self.open_chat),
+            None,
+            rumps.MenuItem(title=self._t('设置'), callback=self.show_settings),
+            None,
+            rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage),
+            rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None),
+            None,
+            rumps.MenuItem(title=self._t('关于'), callback=self.show_about),
+        ]
+        self.update_balance()
 
     def showSyncHelp_(self, _):
         self.show_sync_help(None)
