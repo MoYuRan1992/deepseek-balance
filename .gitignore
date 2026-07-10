@@ -1,9 +1,6 @@
 *.dmg
 *.icns
-__pycache__/
 build/
 dist/
-*.pyc
 .DS_Store
-State.app/
 config.json

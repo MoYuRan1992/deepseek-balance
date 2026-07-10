@@ -41,12 +41,12 @@ macOS 菜单栏实时显示 DeepSeek API 余额。
 
 ## 系统要求 / Requirements
 
-- macOS 10.14+
+- macOS 12.0+
 - Intel & Apple Silicon
 
 ## 开发 / Development
 
 ```bash
-pip3 install rumps certifi py2app
-python3 setup.py py2app
+chmod +x build_swiftui.sh
+./build_swiftui.sh
 ```
