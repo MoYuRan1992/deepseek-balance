@@ -229,7 +229,7 @@ class DeepSeekBalanceApp(rumps.App):
         self.menu_settings = rumps.MenuItem(title=self._t('设置'), callback=self.show_settings)
         self.menu_usage = rumps.MenuItem(title=self._t('使用统计'), callback=self.show_usage)
         self.menu_version = rumps.MenuItem(title=self._t('版本') + ': v' + APP_VERSION, callback=None)
-        self.menu_about = rumps.MenuItem(title=self._t('关于'), callback=self.show_about)
+        self.menu_about = rumps.MenuItem(title=self._t(self._t('关于')), callback=self.show_about)
 
         self.menu = [
             self.menu_item_total,
@@ -709,16 +709,19 @@ class DeepSeekBalanceApp(rumps.App):
     # ---------- 设置窗口 ----------
 
     @rumps.clicked('设置...')
+    @rumps.clicked('设置...')
     def show_settings(self, _):
-        """弹出设置面板，修改即时生效"""
+        """弹出设置面板，修改后关闭窗口自动保存"""
         if hasattr(self, '_settings_panel') and self._settings_panel.isVisible():
             self._settings_panel.makeKeyAndOrderFront_(None)
             return
+
         W, row_h, pad = 320, 26, 12
         left = 14
         label_w = 50
         ctrl_x = left + label_w + 8
-        rows = 12
+        ctrl_w = W - ctrl_x - 14
+        rows = 13
         win_h = rows * (row_h + pad) + pad * 2
 
         panel = AppKit.NSPanel.alloc().initWithContentRect_styleMask_backing_defer_(
@@ -733,118 +736,109 @@ class DeepSeekBalanceApp(rumps.App):
 
         content = panel.contentView()
         y = win_h - pad - row_h
-        font14 = AppKit.NSFont.systemFontOfSize_(15)
+        f = AppKit.NSFont.systemFontOfSize_(15)
 
         def lbl(text):
             t = AppKit.NSTextField.labelWithString_(text)
-            t.setFont_(font14)
+            t.setFont_(f)
             t.setFrame_(((left, y + 5), (label_w, 18)))
             t.setAlignment_(AppKit.NSTextAlignmentRight)
             content.addSubview_(t)
 
-        def inp(val, action=None):
-            t = AppKit.NSTextField.alloc().initWithFrame_(((ctrl_x, y + 5), (140, row_h - 10)))
+        def inp(val):
+            t = AppKit.NSTextField.alloc().initWithFrame_(((ctrl_x, y + 5), (ctrl_w, row_h - 10)))
             t.setStringValue_(val)
-            t.setFont_(font14)
+            t.setFont_(f)
             t.setBordered_(False)
             t.setBezeled_(False)
             t.setAlignment_(AppKit.NSTextAlignmentCenter)
             t.setDrawsBackground_(True)
             t.setBackgroundColor_(AppKit.NSColor.controlBackgroundColor())
-            if action:
-                t.setTarget_(self)
-                t.setAction_(action)
             content.addSubview_(t)
             return t
 
-        def sel(items, current, cb):
-            btn = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((ctrl_x, y + 4), (140, row_h - 8)), False)
+        def sel(items, current):
+            btn = AppKit.NSPopUpButton.alloc().initWithFrame_pullsDown_(((ctrl_x, y + 4), (ctrl_w, row_h - 8)), False)
             for item in items:
                 btn.addItemWithTitle_(str(item))
             btn.setTitle_(str(current))
-            btn.setTarget_(self)
-            btn.setAction_(cb)
             content.addSubview_(btn)
             return btn
 
         def chk(title, checked):
-            cb = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 5), (180, row_h - 10)))
+            cb = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 5), (ctrl_w, row_h - 10)))
             cb.setButtonType_(AppKit.NSSwitchButton)
             cb.setTitle_(title)
-            cb.setFont_(font14)
+            cb.setFont_(f)
             cb.setState_(1 if checked else 0)
-            cb.setTarget_(self)
             content.addSubview_(cb)
             return cb
 
         lbl(self._t('前缀'))
-        inp(self.display_prefix, 'onPrefixChange:')
+        tf_prefix = inp(self.display_prefix)
         y -= row_h + pad
 
         lbl('Key')
-        inp(self.api_key[:12] + '...' + self.api_key[-4:] if len(self.api_key) > 16 else self.api_key, 'onKeyChange:')
+        masked = self.api_key[:12] + '...' + self.api_key[-4:] if len(self.api_key) > 16 else self.api_key
+        tf_key = inp(masked)
         y -= row_h + pad
 
         lbl(self._t('刷新'))
         intervals = ['1分钟', '5分钟', '10分钟', '30分钟', '1小时']
-        self._settings_int_vals = [60, 300, 600, 1800, 3600]
-        sel(intervals, self._format_interval(), 'onIntervalChange:')
+        btn_interval = sel(intervals, self._format_interval())
         y -= row_h + pad
 
         lbl(self._t('上字号'))
         self._settings_top_fonts = [7, 8, 9, 10, 11, 12, 13, 14]
-        sel([str(f) + 'pt' for f in self._settings_top_fonts], str(self.top_font_size) + 'pt', 'onTopFontChange:')
+        btn_top_font = sel([str(x) + 'pt' for x in self._settings_top_fonts], str(self.top_font_size) + 'pt')
         y -= row_h + pad
 
         lbl(self._t('下字号'))
         self._settings_bot_fonts = [5, 6, 7, 8, 9, 10]
-        sel([str(f) + 'pt' for f in self._settings_bot_fonts], str(self.bottom_font_size) + 'pt', 'onBottomFontChange:')
+        btn_bot_font = sel([str(x) + 'pt' for x in self._settings_bot_fonts], str(self.bottom_font_size) + 'pt')
         y -= row_h + pad
 
         lbl(self._t('警告线'))
-        inp(str(self.warn_threshold), 'onWarnChange:')
+        tf_warn = inp(str(self.warn_threshold))
         y -= row_h + pad
 
         lbl(self._t('严重线'))
-        inp(str(self.critical_threshold), 'onCriticalChange:')
+        tf_crit = inp(str(self.critical_threshold))
         y -= row_h + pad
 
         lbl(self._t('开机'))
-        chk(self._t('开机自启'), LAUNCHD_PLIST.exists())
+        cb_auto = chk(self._t('开机自启'), LAUNCHD_PLIST.exists())
         y -= row_h + pad
 
         lbl(self._t('语言'))
-        lang_opts = ['简体中文', 'English', 'Русский']
+        lang_names = ['简体中文', 'English', 'Русский']
         lang_vals = ['zh-CN', 'en', 'ru']
-        cur_lang = {'zh-CN': '简体中文', 'en': 'English', 'ru': 'Русский'}.get(self.lang, '简体中文')
-        self._settings_lang_vals = lang_vals
-        sel(lang_opts, cur_lang, 'onLanguageChange:')
+        cur = {'zh-CN': '简体中文', 'en': 'English', 'ru': 'Русский'}.get(self.lang, '简体中文')
+        btn_lang = sel(lang_names, cur)
         y -= row_h + pad
 
-        btn_h = row_h - 2
-        b1 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 1), (100, btn_h)))
-        b1.setTitle_(self._t('多端同步说明'))
-        b1.setBezelStyle_(AppKit.NSRoundedBezelStyle)
-        b1.setTarget_(self)
-        b1.setAction_('showSyncHelp:')
-        content.addSubview_(b1)
-        b2 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x + 110, y + 1), (80, btn_h)))
-        b2.setTitle_(self._t('关于'))
-        b2.setBezelStyle_(AppKit.NSRoundedBezelStyle)
-        b2.setTarget_(self)
-        b2.setAction_('showAbout:')
-        content.addSubview_(b2)
-        y -= row_h + pad
-
+        bh = row_h - 2
         lbl(self._t('多端'))
         t = AppKit.NSTextField.labelWithString_(self._t('多端同步说明文字'))
-        t.setFont_(font14)
+        t.setFont_(f)
         t.setTextColor_(AppKit.NSColor.secondaryLabelColor())
         t.setFrame_(((ctrl_x, y + 6), (200, 17)))
         content.addSubview_(t)
         y -= row_h + pad
 
-        # 作者（右下角贴边）
+        b1 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x, y + 1), (100, bh)))
+        b1.setTitle_(self._t('多端同步说明'))
+        b1.setBezelStyle_(AppKit.NSRoundedBezelStyle)
+        b1.setTarget_(self)
+        b1.setAction_('showSyncHelp:')
+        content.addSubview_(b1)
+        b2 = AppKit.NSButton.alloc().initWithFrame_(((ctrl_x + 110, y + 1), (80, bh)))
+        b2.setTitle_(self._t('关于'))
+        b2.setBezelStyle_(AppKit.NSRoundedBezelStyle)
+        b2.setTarget_(self)
+        b2.setAction_('showAbout:')
+        content.addSubview_(b2)
+
         author = AppKit.NSTextField.labelWithString_(self._t('by_MoYuRan'))
         author.setFont_(AppKit.NSFont.systemFontOfSize_(10))
         author.setTextColor_(AppKit.NSColor.secondaryLabelColor())
@@ -852,11 +846,52 @@ class DeepSeekBalanceApp(rumps.App):
         author.setAlignment_(AppKit.NSTextAlignmentRight)
         content.addSubview_(author)
 
+        # 定时轮询：关闭窗口时自动保存全部设置
+        def poll_save():
+            if not panel.isVisible():
+                timer.invalidate()
+                v = tf_prefix.stringValue().strip()
+                if v and len(v) <= 8:
+                    self.display_prefix = v
+                kv = tf_key.stringValue().strip()
+                if kv and '...' not in kv:
+                    self.api_key = kv
+                idx = btn_interval.indexOfSelectedItem()
+                ivals = [60, 300, 600, 1800, 3600]
+                if 0 <= idx < len(ivals):
+                    self._set_interval(ivals[idx])
+                idx = btn_top_font.indexOfSelectedItem()
+                if 0 <= idx < len(self._settings_top_fonts):
+                    self._set_top_font(self._settings_top_fonts[idx])
+                idx = btn_bot_font.indexOfSelectedItem()
+                if 0 <= idx < len(self._settings_bot_fonts):
+                    self._set_bottom_font(self._settings_bot_fonts[idx])
+                try:
+                    v = float(tf_warn.stringValue())
+                    if v > 0: self._set_warn_threshold(v)
+                except ValueError: pass
+                try:
+                    v = float(tf_crit.stringValue())
+                    if v > 0: self._set_critical_threshold(v)
+                except ValueError: pass
+                if cb_auto.state() == 1 and not LAUNCHD_PLIST.exists():
+                    self.toggle_autostart(None)
+                elif cb_auto.state() == 0 and LAUNCHD_PLIST.exists():
+                    self.toggle_autostart(None)
+                idx = btn_lang.indexOfSelectedItem()
+                if 0 <= idx < len(lang_vals):
+                    self.lang = lang_vals[idx]
+                    self._save_settings()
+                    load_locale(self.lang)
+                    self.refresh_language()
+                else:
+                    self._save_settings()
+        timer = rumps.Timer(poll_save, 1.0)
+        timer.start()
+
         self._settings_panel = panel
         AppKit.NSApp().activateIgnoringOtherApps_(True)
         panel.makeKeyAndOrderFront_(None)
-
-    # ---------- 设置窗口回调 ----------
 
     def onPrefixChange_(self, sender):
         val = sender.stringValue().strip()
@@ -864,25 +899,6 @@ class DeepSeekBalanceApp(rumps.App):
             self.display_prefix = val
             self._save_settings()
             self.update_balance()
-
-    def onKeyChange_(self, sender):
-        """弹出对话框修改 API Key"""
-        window = rumps.Window(
-            message='请输入 DeepSeek API Key：',
-            title='修改 API Key',
-            default_text=self.api_key,
-            ok='保存',
-            cancel='取消',
-            dimensions=(420, 80),
-            has_secret=True,
-        )
-        response = window.run()
-        if response.clicked and window.text.strip():
-            self.api_key = window.text.strip()
-            self._save_settings()
-            self._set_custom_title('...', self.display_prefix)
-            self.update_balance()
-            log(self._t('日志_检测到API_Key变更'))
 
     def onIntervalChange_(self, sender):
         idx = sender.indexOfSelectedItem()
