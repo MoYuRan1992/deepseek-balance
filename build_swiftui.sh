@@ -26,6 +26,7 @@ SWIFT_SOURCES=(
     "Services.swift"
     "SettingsView.swift"
     "UpdatePromptView.swift"
+    "UsageView.swift"
     "AppDelegate.swift"
     "main.swift"
 )
@@ -103,6 +104,8 @@ if [ -f "$PROJECT_DIR/AppIcon.svg" ]; then
         cp "$RESOURCES_DIR/AppIcon.icns" "$PROJECT_DIR/AppIcon.icns"
         rm -f "$SRC"
         echo "图标已生成: AppIcon.icns"
+    else
+        echo "警告: AppIcon.svg 渲染失败，应用将没有图标！" >&2
     fi
 fi
 
@@ -143,6 +146,12 @@ rm -f "$BUILD_DIR/arm64_$EXEC_NAME" "$BUILD_DIR/x86_64_$EXEC_NAME"
 
 # ---------- 创建 DMG ----------
 echo "=== 创建空白 DMG 并挂载 ==="
+cleanup_dmg() {
+    if mount | grep -q "$DMG_MOUNT"; then
+        hdiutil detach "$DMG_MOUNT" -force 2>/dev/null || true
+    fi
+}
+trap cleanup_dmg EXIT
 hdiutil create \
     -size 20m \
     -fs HFS+ \

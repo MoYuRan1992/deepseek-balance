@@ -3,7 +3,8 @@
   "display_prefix": "API",
   "top_font_size": 10,
   "bottom_font_size": 7,
-  "warn_threshold": 5,
-  "critical_threshold": 20,
-  "refresh_interval": 300
+  "danger_threshold": 5,
+  "warn_threshold": 20,
+  "refresh_interval": 300,
+  "lang": "zh-CN"
 }

@@ -16,8 +16,8 @@ struct SettingsView: View {
     @State private var refreshIntervalIdx: Int
     @State private var topFontSize: Double
     @State private var botFontSize: Double
+    @State private var dangerThresholdStr: String
     @State private var warnThresholdStr: String
-    @State private var criticalThresholdStr: String
     @State private var langIdx: Int
     @State private var autoStart: Bool
 
@@ -37,8 +37,8 @@ struct SettingsView: View {
         _refreshIntervalIdx = State(initialValue: INTERVAL_PRESETS.firstIndex(where: { $0.seconds == c.refresh_interval }) ?? 1)
         _topFontSize = State(initialValue: Double(c.top_font_size))
         _botFontSize = State(initialValue: Double(c.bottom_font_size))
+        _dangerThresholdStr = State(initialValue: String(c.danger_threshold))
         _warnThresholdStr = State(initialValue: String(c.warn_threshold))
-        _criticalThresholdStr = State(initialValue: String(c.critical_threshold))
         _langIdx = State(initialValue: LANG_OPTS.firstIndex(where: { $0.0 == c.lang }) ?? 0)
         _autoStart = State(initialValue: autoStartEnabled)
     }
@@ -46,8 +46,8 @@ struct SettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             // 顶部标题区
-            HStack(spacing: 10) {
-                Image(systemName: "brain.head.profile")
+            HStack(alignment: .bottom, spacing: 10) {
+                Image(systemName: "cpu")
                     .font(.system(size: 24, weight: .medium))
                     .foregroundColor(.blue)
                 Text("DeepSeek Balance")
@@ -56,7 +56,7 @@ struct SettingsView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            .padding(.bottom, 22)
+            .padding(.bottom, 18)
 
             // 数据卡片
             HStack(spacing: 12) {
@@ -65,7 +65,7 @@ struct SettingsView: View {
                     value: config.api_key.isEmpty ? "---" : balanceText,
                     icon: "wallet.pass.fill",
                     color: .blue,
-                    action: { NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com/top_up?_gl=1")!) }
+                    action: { NSWorkspace.shared.open(URL_TOPUP) }
                 )
                 DashboardCard(
                     title: t("今日使用"),
@@ -75,11 +75,11 @@ struct SettingsView: View {
                     action: { onShowUsage() }
                 )
             }
-            .padding(.bottom, 22)
+            .padding(.bottom, 20)
 
 
             // 设置卡片
-            VStack(spacing: 10) {
+            VStack(spacing: 12) {
                 // API 连接
                 SettingsCard {
                     HStack(spacing: 6) {
@@ -94,7 +94,7 @@ struct SettingsView: View {
                             .font(.subheadline)
                         Picker("", selection: $refreshIntervalIdx) {
                             ForEach(Array(INTERVAL_PRESETS.enumerated()), id: \.offset) { i, p in
-                                Text(p.label).tag(i)
+                                Text(t(p.key)).tag(i)
                             }
                         }
                         .labelsHidden()
@@ -103,9 +103,10 @@ struct SettingsView: View {
                     }
                     Divider()
                     HStack(spacing: 6) {
-                        Text("Key")
+                        Text(t("api_key_label"))
                             .frame(width: 50, alignment: .leading)
                             .font(.subheadline)
+                            .padding(.leading, 2)
                         if showKey {
                             TextField("sk-...", text: $apiKey)
                                 .textFieldStyle(.roundedBorder)
@@ -181,10 +182,12 @@ struct SettingsView: View {
                     }
                     Divider()
                     HStack(spacing: 6) {
-                        Spacer().frame(width: 50)
+                        Image(systemName: "bell.badge")
+                            .foregroundColor(.red)
+                            .frame(width: 50, alignment: .leading)
                         Text(t("严重线"))
                             .font(.subheadline)
-                        TextField("", text: $criticalThresholdStr)
+                        TextField("", text: $dangerThresholdStr)
                             .textFieldStyle(.roundedBorder)
                             .frame(width: 56)
                         Text("¥")
@@ -214,9 +217,9 @@ struct SettingsView: View {
                     }
                 }
             }
-            .padding(.top, 10)
+            .padding(.top, 6)
 
-            Spacer(minLength: 12)
+            Spacer(minLength: 16)
 
             // 底栏
             Divider()
@@ -232,14 +235,19 @@ struct SettingsView: View {
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
 
-                Button(action: { NSWorkspace.shared.open(URL(string: "https://github.com/MoYuRan1992")!) }) {
-                    Text("by MoYuRan")
+                Button(action: { NSWorkspace.shared.open(URL_GITHUB_AUTHOR) }) {
+                    Text(t("by_MoYuRan"))
                         .font(.caption)
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
 
                 Spacer()
+
+                Button(t("恢复默认")) { resetToDefaults() }
+                    .buttonStyle(.plain)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
 
                 Button(t("保存设置")) { saveAndClose() }
                     .buttonStyle(.borderedProminent)
@@ -256,11 +264,14 @@ struct SettingsView: View {
     }
 
     func saveAndClose() {
-        if let v = Double(warnThresholdStr), v > 0 { config.warn_threshold = v }
-        if let v = Double(criticalThresholdStr), v > 0 { config.critical_threshold = v }
+        if let wv = Double(dangerThresholdStr), wv > 0 { config.danger_threshold = wv }
+        if let cv = Double(warnThresholdStr), cv > 0 { config.warn_threshold = cv }
+        if config.danger_threshold >= config.warn_threshold {
+            config.danger_threshold = max(config.warn_threshold / 2, 0.01)
+        }
         if !displayPrefix.isEmpty, displayPrefix.count <= 8 { config.display_prefix = displayPrefix }
         let kv = apiKey.trimmingCharacters(in: .whitespaces)
-        if !kv.isEmpty { config.api_key = kv }
+        config.api_key = kv
         if refreshIntervalIdx >= 0, refreshIntervalIdx < INTERVAL_PRESETS.count {
             config.refresh_interval = INTERVAL_PRESETS[refreshIntervalIdx].seconds
         }
@@ -278,8 +289,8 @@ struct SettingsView: View {
         refreshIntervalIdx = 1
         topFontSize = 10
         botFontSize = 7
-        warnThresholdStr = "5"
-        criticalThresholdStr = "20"
+        dangerThresholdStr = "5"
+        warnThresholdStr = "20"
         langIdx = 0
         autoStart = false
     }
@@ -299,13 +310,13 @@ struct DashboardCard: View {
             HStack(spacing: 4) {
                 Image(systemName: icon)
                     .foregroundColor(color)
-                    .font(.caption)
+                    .font(.system(size: 13))
                 Text(title)
-                    .font(.caption)
+                    .font(.system(size: 13))
                     .foregroundColor(.secondary)
             }
             Text(value)
-                .font(.system(size: 16, weight: .bold, design: .rounded))
+                .font(.system(size: 20, weight: .bold, design: .rounded))
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 12)
@@ -328,10 +339,10 @@ struct SettingsCard<Content: View>: View {
     }
 
     var body: some View {
-        VStack(spacing: 5) {
+        VStack(spacing: 8) {
             content
         }
-        .padding(10)
+        .padding(12)
         .background(.ultraThinMaterial)
         .cornerRadius(12)
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.1), lineWidth: 1))
@@ -342,6 +353,13 @@ struct SettingsCard<Content: View>: View {
 // MARK: - 窗口控制器
 
 class SettingsWindowController: NSWindowController {
+    private var configBinding: Binding<Config>?
+    private var toggleAutoStartAction: (() -> Void)?
+    private var saveAction: (() -> Void)?
+    private var checkUpdateAction: (() -> Void)?
+    private var showUsageAction: (() -> Void)?
+    private var autoStartEnabledVal: Bool = false
+
     convenience init(config: Binding<Config>, balanceText: String, todayUsedText: String, autoStartEnabled: Bool, onToggleAutoStart: @escaping () -> Void, onSave: @escaping () -> Void, onCheckUpdate: @escaping () -> Void, onShowUsage: @escaping () -> Void) {
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 380, height: 560),
@@ -352,20 +370,37 @@ class SettingsWindowController: NSWindowController {
         win.title = t("设置标题")
         win.center()
         win.isReleasedWhenClosed = false
+        self.init(window: win)
 
-        let hostingView = NSHostingView(rootView: SettingsView(
-            config: config,
-            balanceText: balanceText,
-            todayUsedText: todayUsedText,
-            autoStartEnabled: autoStartEnabled,
-            onToggleAutoStart: onToggleAutoStart,
-            onSave: { onSave(); win.close() },
-            onCheckUpdate: onCheckUpdate,
-            onShowUsage: onShowUsage
-        ))
+        configBinding = config
+        toggleAutoStartAction = onToggleAutoStart
+        saveAction = onSave
+        checkUpdateAction = onCheckUpdate
+        showUsageAction = onShowUsage
+        autoStartEnabledVal = autoStartEnabled
+
+        let hostingView = NSHostingView(rootView: makeSettingsView(balanceText: balanceText, todayUsedText: todayUsedText))
         hostingView.autoresizingMask = [.width, .height]
         win.contentView = hostingView
+    }
 
-        self.init(window: win)
+    func updateContent(balanceText: String, todayUsedText: String, autoStartEnabled: Bool) {
+        autoStartEnabledVal = autoStartEnabled
+        if let hostingView = window?.contentView as? NSHostingView<SettingsView> {
+            hostingView.rootView = makeSettingsView(balanceText: balanceText, todayUsedText: todayUsedText)
+        }
+    }
+
+    private func makeSettingsView(balanceText: String, todayUsedText: String) -> SettingsView {
+        SettingsView(
+            config: configBinding ?? .constant(Config()),
+            balanceText: balanceText,
+            todayUsedText: todayUsedText,
+            autoStartEnabled: autoStartEnabledVal,
+            onToggleAutoStart: toggleAutoStartAction ?? {},
+            onSave: { [weak self] in self?.saveAction?(); self?.window?.close() },
+            onCheckUpdate: checkUpdateAction ?? {},
+            onShowUsage: showUsageAction ?? {}
+        )
     }
 }

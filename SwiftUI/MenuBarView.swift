@@ -17,7 +17,7 @@ class MenuBarView: NSView {
         }
     }
 
-    required init?(coder: NSCoder) { fatalError() }
+    required init?(coder: NSCoder) { return nil }
 
     @discardableResult
     func update(top: String, bottom: String, topColor: NSColor? = nil) -> CGFloat {
@@ -33,10 +33,10 @@ class MenuBarView: NSView {
 
         let tw = max(topLabel.frame.width, bottomLabel.frame.width)
         let th = topLabel.frame.height + bottomLabel.frame.height
-        let newSize = NSSize(width: tw + 2, height: th)
+        let newSize = NSSize(width: tw + 6, height: th)
         if frame.size != newSize { frame.size = newSize }
         topLabel.frame.origin = NSPoint(x: frame.width / 2 - topLabel.frame.width / 2, y: bottomLabel.frame.height)
         bottomLabel.frame.origin = NSPoint(x: frame.width / 2 - bottomLabel.frame.width / 2, y: 0)
-        return tw + 2
+        return tw + 6
     }
 }

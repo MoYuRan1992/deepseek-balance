@@ -9,6 +9,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     var cache = CacheData()
     var timer: Timer?
     var settingsWC: SettingsWindowController?
+    var updateWC: UpdateWindowController?
+    var usageWC: NSWindowController?
+    var wasSettingsOpen = false
     var isFirstUpdate = true
     var prevBalanceOk = false
 
@@ -19,10 +22,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - 启动
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        config = loadConfig()
+        loadLocale(config.lang)
+
         if !acquireLock() {
             let alert = NSAlert()
             alert.messageText = "DeepSeek Balance"
-            alert.informativeText = "已在运行中\n\n请查看菜单栏右上角。"
+            alert.informativeText = t("已在运行中")
             alert.runModal()
             NSApp.terminate(nil)
             return
@@ -31,27 +37,39 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         UNUserNotificationCenter.current().delegate = self
         UNUserNotificationCenter.current().requestAuthorization(options: [.alert, .sound]) { _, _ in }
 
-        config = loadConfig()
-        loadLocale(config.lang)
         cache = loadCache()
 
         todayDate = cache.today_date
         todayUsed = cache.today_used
         prevTotal = cache.prev_total
         let curDate = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
-        if todayDate != curDate { todayDate = ""; todayUsed = 0; prevTotal = 0 }
+        if todayDate != curDate {
+            if !todayDate.isEmpty && todayUsed > 0.00005 {
+                var history = loadDailyUsage()
+                history.removeAll { $0.date == todayDate }
+                history.append(DailyEntry(date: todayDate, used: round(todayUsed * 10000) / 10000))
+                saveDailyUsage(history)
+            }
+            todayDate = ""
+            todayUsed = 0
+            prevTotal = 0
+            saveCache(CacheData(balance: cache.balance, ts: Date().timeIntervalSince1970))
+        }
 
         setupStatusBar()
         startTimer()
         refresh()
-        appLog("应用启动")
+        appLog(t("日志_应用启动"))
     }
 
     func applicationWillTerminate(_ notification: Notification) {
-        appLog("应用退出")
+        appLog(t("日志_应用退出"))
         timer?.invalidate()
         releaseLock()
         archiveYesterdayIfNeeded()
+        if let token = usageCloseObserverToken {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
     // MARK: - 状态栏
@@ -92,12 +110,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             try? FileManager.default.removeItem(at: LAUNCHD_PLIST)
         } else {
             let appPath = Bundle.main.bundlePath
+            let escapedPath = appPath.replacingOccurrences(of: "&", with: "&amp;")
+                .replacingOccurrences(of: "<", with: "&lt;")
+                .replacingOccurrences(of: ">", with: "&gt;")
             let content = """
             <?xml version="1.0" encoding="UTF-8"?>
             <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
             <plist version="1.0"><dict>
             <key>Label</key><string>com.deepseek.balance</string>
-            <key>ProgramArguments</key><array><string>/usr/bin/open</string><string>\(appPath)</string></array>
+            <key>ProgramArguments</key><array><string>/usr/bin/open</string><string>\(escapedPath)</string></array>
             <key>RunAtLoad</key><true/><key>KeepAlive</key><false/>
             </dict></plist>
             """
@@ -112,32 +133,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     func startTimer() {
         timer?.invalidate()
-        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(config.refresh_interval), repeats: true) { [weak self] _ in
+        timer = Timer.scheduledTimer(withTimeInterval: TimeInterval(max(config.refresh_interval, 60)), repeats: true) { [weak self] _ in
             self?.refresh()
         }
     }
 
+    var isRefreshing = false
+
     @objc func refresh() {
         guard !config.api_key.isEmpty else {
-            let w = menuBarView.update(top: "⚙", bottom: config.display_prefix)
-            statusItem.length = w + 4
+            let w = menuBarView.update(top: "\u{2699}", bottom: config.display_prefix)
+            statusItem.length = w
             updateMenuBalance(nil)
             return
         }
 
-        Task {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        Task { [weak self] in
+            guard let self = self else { return }
             do {
-                let balance = try await queryBalance(apiKey: config.api_key)
-                await MainActor.run { self.handleBalance(balance) }
+                let balance = try await queryBalance(apiKey: self.config.api_key)
+                await MainActor.run {
+                    self.handleBalance(balance)
+                    self.isRefreshing = false
+                }
             } catch {
                 await MainActor.run {
                     if let cached = self.cache.balance {
                         self.updateDisplay(balance: cached, isCached: true)
                     } else {
-                        self.menuBarView.update(top: "✗", bottom: self.config.display_prefix)
-                        self.statusItem.length = self.menuBarView.frame.width + 4
+                        self.menuBarView.update(top: "\u{2717}", bottom: self.config.display_prefix)
+                        self.statusItem.length = self.menuBarView.frame.width
                         self.updateMenuBalance(nil, error: error.localizedDescription)
                     }
+                    self.isRefreshing = false
                 }
             }
         }
@@ -148,12 +178,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let c = CacheData(balance: balance, ts: Date().timeIntervalSince1970, today_date: todayDate, prev_total: prevTotal, today_used: todayUsed)
         saveCache(c)
         cache = c
-        appLog("余额更新: ¥\(balance.total_balance)")
+        appLog("\(t("日志_余额更新")): ¥\(balance.total_balance)")
 
-        if !isFirstUpdate && prevBalanceOk && balance.total_balance < config.warn_threshold {
+        if !isFirstUpdate && prevBalanceOk && balance.total_balance < config.danger_threshold {
             sendNotification(title: t("余额不足警告"), body: t("余额不足内容", ["balance": String(format: "%.2f", balance.total_balance)]))
         }
-        prevBalanceOk = balance.total_balance >= config.warn_threshold
+        prevBalanceOk = balance.total_balance >= config.danger_threshold
         isFirstUpdate = false
         updateDisplay(balance: balance, isCached: false)
     }
@@ -162,14 +192,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         let top = "¥\(String(format: "%.2f", balance.total_balance))"
         let bottom = config.display_prefix
         var color: NSColor?
-        if !isCached && balance.total_balance < config.warn_threshold {
+        if !isCached && balance.total_balance < config.danger_threshold {
             color = .systemRed
-        } else if !isCached && balance.total_balance < config.critical_threshold {
+        } else if !isCached && balance.total_balance < config.warn_threshold {
             color = .systemOrange
         }
         menuBarView.config = config
         let w = menuBarView.update(top: top, bottom: bottom, topColor: color)
-        statusItem.length = w + 4
+        statusItem.length = w
         updateMenuBalance(balance)
     }
 
@@ -192,8 +222,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func updateTodayUsage(_ total: Double) {
         let today = String(ISO8601DateFormatter().string(from: Date()).prefix(10))
         if todayDate != today {
-            if !todayDate.isEmpty {
+            if !todayDate.isEmpty && todayUsed > 0.00005 {
                 var history = loadDailyUsage()
+                history.removeAll { $0.date == todayDate }
                 history.append(DailyEntry(date: todayDate, used: round(todayUsed * 10000) / 10000))
                 saveDailyUsage(history)
             }
@@ -208,8 +239,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     }
 
     func archiveYesterdayIfNeeded() {
-        if !todayDate.isEmpty {
+        if !todayDate.isEmpty, todayUsed > 0 {
             var history = loadDailyUsage()
+            history.removeAll { $0.date == todayDate }
             history.append(DailyEntry(date: todayDate, used: round(todayUsed * 10000) / 10000))
             saveDailyUsage(history)
         }
@@ -232,16 +264,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     // MARK: - 设置
 
     @objc func showSettings() {
-        if let wc = settingsWC, wc.window?.isVisible == true {
-            wc.window?.makeKeyAndOrderFront(nil)
-            return
-        }
-
-        let binding = Binding<Config>(
-            get: { self.config },
-            set: { self.config = $0 }
-        )
-
+        usageWC?.window?.close()
         let autoStartOn = FileManager.default.fileExists(atPath: LAUNCHD_PLIST.path)
 
         let balanceStr: String = {
@@ -253,6 +276,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             return "---"
         }()
 
+        if let wc = settingsWC, wc.window?.isVisible == true {
+            wc.updateContent(balanceText: balanceStr, todayUsedText: todayStr, autoStartEnabled: autoStartOn)
+            wc.window?.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let binding = Binding<Config>(
+            get: { self.config },
+            set: { self.config = $0 }
+        )
+
+        let oldKey = self.config.api_key
+
         settingsWC = SettingsWindowController(
             config: binding,
             balanceText: balanceStr,
@@ -263,6 +300,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
             },
             onSave: { [weak self] in
                 guard let self = self else { return }
+                if oldKey != self.config.api_key {
+                    self.prevTotal = 0
+                    self.todayUsed = 0
+                    self.todayDate = ""
+                    self.prevBalanceOk = false
+                    self.isFirstUpdate = true
+                    self.cache = CacheData()
+                    saveCache(CacheData())
+                    self.updateMenuBalance(nil)
+                    self.menuBarView.update(top: "\u{2699}", bottom: self.config.display_prefix)
+                    self.statusItem.length = self.menuBarView.frame.width
+                }
                 saveConfig(self.config)
                 loadLocale(self.config.lang)
                 self.startTimer()
@@ -282,29 +331,85 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    func resetUsageStats() {
+        saveDailyUsage([])
+        todayUsed = 0
+        prevTotal = 0
+        todayDate = ""
+        isFirstUpdate = true
+        prevBalanceOk = false
+        let preserved = CacheData(balance: cache.balance, ts: cache.ts, today_date: "", prev_total: 0, today_used: 0)
+        saveCache(preserved)
+        cache = preserved
+    }
+
     // MARK: - 使用统计
 
     @objc func showUsage() {
+        wasSettingsOpen = settingsWC?.window?.isVisible == true
+        settingsWC?.window?.close()
         let history = loadDailyUsage()
-        if history.isEmpty {
-            let a = NSAlert(); a.messageText = t("暂无使用记录"); a.runModal(); return
+
+        let onResetAction: () -> Void = { [weak self] in
+            self?.resetUsageStats()
+            self?.showUsage()
         }
-        var lines = [String]()
-        for e in history.sorted(by: { $0.date > $1.date }) {
-            lines.append("\(e.date)  ¥\(String(format: "%.4f", e.used))")
+
+        if let existingWindow = usageWC?.window, existingWindow.isVisible {
+            existingWindow.contentView = NSHostingView(rootView: UsageView(
+                balance: cache.balance,
+                todayUsed: todayUsed,
+                history: history,
+                onReset: onResetAction
+            ))
+            ensureCloseObserver(for: existingWindow)
+            existingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
         }
-        let total = history.reduce(0) { $0 + $1.used }
-        lines.append("")
-        lines.append("合计  ¥\(String(format: "%.4f", total))")
-        let a = NSAlert()
-        a.messageText = Array(lines.prefix(35)).joined(separator: "\n")
-        a.addButton(withTitle: "关闭")
-        a.addButton(withTitle: "重置统计")
-        if a.runModal() == .alertSecondButtonReturn {
-            saveDailyUsage([])
-            todayUsed = 0
-            prevTotal = 0
-            todayDate = ""
+
+        let win = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 380, height: 480),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered,
+            defer: false
+        )
+        win.title = t("使用统计")
+        win.center()
+        win.isReleasedWhenClosed = false
+        win.minSize = NSSize(width: 300, height: 200)
+
+        let hostingView = NSHostingView(rootView: UsageView(
+            balance: cache.balance,
+            todayUsed: todayUsed,
+            history: history,
+            onReset: onResetAction
+        ))
+        hostingView.autoresizingMask = [.width, .height]
+        win.contentView = hostingView
+
+        ensureCloseObserver(for: win)
+        usageWC?.window?.contentView = nil
+        usageWC?.window?.close()
+        usageWC = NSWindowController(window: win)
+        usageWC?.showWindow(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    private var usageCloseObserverToken: NSObjectProtocol?
+
+    func ensureCloseObserver(for window: NSWindow) {
+        if let token = usageCloseObserverToken {
+            NotificationCenter.default.removeObserver(token)
+        }
+        usageCloseObserverToken = NotificationCenter.default.addObserver(
+            forName: NSWindow.willCloseNotification,
+            object: window,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self, self.wasSettingsOpen else { return }
+            self.wasSettingsOpen = false
+            self.showSettings()
         }
     }
 
@@ -319,17 +424,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
 
     // MARK: - 外部链接
 
-    @objc func openPlatform() { NSWorkspace.shared.open(URL(string: "https://platform.deepseek.com/")!) }
-    @objc func openChat() { NSWorkspace.shared.open(URL(string: "https://chat.deepseek.com/")!) }
+    @objc func openPlatform() { NSWorkspace.shared.open(URL_PLATFORM) }
+    @objc func openChat() { NSWorkspace.shared.open(URL_CHAT) }
     @objc func openRelease() { checkForUpdate() }
 
     func checkForUpdate() {
-        let url = URL(string: "https://api.github.com/repos/MoYuRan1992/deepseek-balance/releases/latest")!
-        var req = URLRequest(url: url, timeoutInterval: 10)
+        settingsWC?.window?.close()
+        var req = URLRequest(url: URL_GITHUB_LATEST, timeoutInterval: 10)
         req.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+        req.setValue("deepseek-balance/\(APP_VERSION)", forHTTPHeaderField: "User-Agent")
 
-        URLSession.shared.dataTask(with: req) { data, _, error in
+        URLSession.shared.dataTask(with: req) { [weak self] data, _, error in
             DispatchQueue.main.async {
+                guard let self = self else { return }
                 guard let data = data,
                       let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                       let tagName = json["tag_name"] as? String,
@@ -337,12 +444,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                       let dmgAsset = assets.first(where: { ($0["name"] as? String ?? "").hasSuffix(".dmg") }),
                       let downloadURL = dmgAsset["browser_download_url"] as? String else {
                     let errAlert = NSAlert()
-                    errAlert.messageText = "检查更新失败"
-                    errAlert.informativeText = error?.localizedDescription ?? "无法连接 GitHub，请检查网络。"
-                    errAlert.addButton(withTitle: "手动查看")
-                    errAlert.addButton(withTitle: "取消")
+                    errAlert.messageText = t("检查更新失败")
+                    errAlert.informativeText = error?.localizedDescription ?? t("无法连接GitHub")
+                    errAlert.addButton(withTitle: t("手动查看"))
+                    errAlert.addButton(withTitle: t("btn_取消"))
                     if errAlert.runModal() == .alertFirstButtonReturn {
-                        NSWorkspace.shared.open(URL(string: "https://github.com/MoYuRan1992/deepseek-balance/releases/latest")!)
+                        NSWorkspace.shared.open(URL_GITHUB_RELEASE)
                     }
                     return
                 }
@@ -350,12 +457,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                 let latestVersion = tagName.hasPrefix("v") ? String(tagName.dropFirst()) : tagName
                 let notes = json["body"] as? String
 
-                if latestVersion == APP_VERSION {
+                if latestVersion.compare(APP_VERSION, options: .numeric) != .orderedDescending {
                     let a = NSAlert()
-                    a.messageText = "已是最新版本"
-                    a.informativeText = "当前版本 v\(APP_VERSION) 已是最新。"
+                    a.messageText = t("已是最新版本")
+                    a.informativeText = t("版本已最新", ["version": APP_VERSION])
                     a.alertStyle = .informational
-                    a.addButton(withTitle: "确定")
+                    a.addButton(withTitle: t("btn_确定"))
                     a.runModal()
                 } else {
                     let wc = UpdateWindowController(
@@ -366,10 +473,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
                             self?.downloadUpdate(from: downloadURL, version: tagName)
                         },
                         onManualCheck: {
-                            NSWorkspace.shared.open(URL(string: "https://github.com/MoYuRan1992/deepseek-balance/releases/latest")!)
+                            NSWorkspace.shared.open(URL_GITHUB_RELEASE)
                         },
                         onDismiss: {}
                     )
+                    self.updateWC = wc
                     wc.showWindow(nil)
                     wc.window?.center()
                     wc.window?.makeKeyAndOrderFront(nil)
@@ -382,31 +490,41 @@ class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDele
     func downloadUpdate(from urlString: String, version: String) {
         guard let url = URL(string: urlString) else { return }
 
-        URLSession.shared.downloadTask(with: url) { localURL, _, error in
-            DispatchQueue.main.async {
-                guard let localURL = localURL, error == nil else {
+        URLSession.shared.downloadTask(with: url) { tmpURL, _, error in
+            guard let tmpURL = tmpURL, error == nil else {
+                DispatchQueue.main.async {
                     let errAlert = NSAlert()
-                    errAlert.messageText = "下载失败"
-                    errAlert.informativeText = error?.localizedDescription ?? "请检查网络后重试。"
-                    errAlert.addButton(withTitle: "手动查看")
-                    errAlert.addButton(withTitle: "取消")
+                    errAlert.messageText = t("下载失败")
+                    errAlert.informativeText = error?.localizedDescription ?? t("请检查网络后重试")
+                    errAlert.addButton(withTitle: t("手动查看"))
+                    errAlert.addButton(withTitle: t("btn_取消"))
                     if errAlert.runModal() == .alertFirstButtonReturn {
-                        NSWorkspace.shared.open(URL(string: "https://github.com/MoYuRan1992/deepseek-balance/releases/latest")!)
+                        NSWorkspace.shared.open(URL_GITHUB_RELEASE)
                     }
+                }
+                return
+            }
+
+            let downloadsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
+            let destURL = downloadsDir.appendingPathComponent("DeepSeek Balance \(version).dmg")
+            try? FileManager.default.removeItem(at: destURL)
+            let moved = (try? FileManager.default.moveItem(at: tmpURL, to: destURL)) != nil
+
+            DispatchQueue.main.async {
+                guard moved else {
+                    let errAlert = NSAlert()
+                    errAlert.messageText = t("下载失败")
+                    errAlert.informativeText = t("请检查网络后重试")
+                    errAlert.addButton(withTitle: t("btn_确定"))
+                    errAlert.runModal()
                     return
                 }
-
-                let downloadsDir = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Downloads")
-                let destURL = downloadsDir.appendingPathComponent("DeepSeek Balance \(version).dmg")
-                try? FileManager.default.removeItem(at: destURL)
-                try? FileManager.default.moveItem(at: localURL, to: destURL)
-
                 let doneAlert = NSAlert()
-                doneAlert.messageText = "下载完成"
-                doneAlert.informativeText = "已保存到「下载」文件夹。"
+                doneAlert.messageText = t("下载完成")
+                doneAlert.informativeText = t("已保存到下载文件夹")
                 doneAlert.alertStyle = .informational
-                doneAlert.addButton(withTitle: "打开安装")
-                doneAlert.addButton(withTitle: "稍后")
+                doneAlert.addButton(withTitle: t("btn_打开安装"))
+                doneAlert.addButton(withTitle: t("btn_稍后"))
                 if doneAlert.runModal() == .alertFirstButtonReturn {
                     NSWorkspace.shared.open(destURL)
                 }

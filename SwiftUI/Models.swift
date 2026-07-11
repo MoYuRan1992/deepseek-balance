@@ -5,8 +5,8 @@ struct Config: Codable {
     var display_prefix: String = "API"
     var top_font_size: Int = 10
     var bottom_font_size: Int = 7
-    var warn_threshold: Double = 5
-    var critical_threshold: Double = 20
+    var danger_threshold: Double = 5
+    var warn_threshold: Double = 20
     var refresh_interval: Int = 300
     var lang: String = "zh-CN"
 }
@@ -31,12 +31,13 @@ struct DailyEntry: Codable {
     var used: Double
 }
 
-let INTERVAL_PRESETS: [(label: String, seconds: Int)] = [
-    ("1分钟", 60), ("5分钟", 300), ("10分钟", 600), ("30分钟", 1800), ("1小时", 3600)
+let INTERVAL_PRESETS: [(key: String, seconds: Int)] = [
+    ("interval_1min", 60),
+    ("interval_5min", 300),
+    ("interval_10min", 600),
+    ("interval_30min", 1800),
+    ("interval_1hour", 3600)
 ]
-
-let TOP_FONT_OPTS = [7, 8, 9, 10, 11, 12, 13, 14]
-let BOT_FONT_OPTS = [5, 6, 7, 8, 9, 10]
 
 let LANG_OPTS = [
     ("zh-CN", "简体中文"),
